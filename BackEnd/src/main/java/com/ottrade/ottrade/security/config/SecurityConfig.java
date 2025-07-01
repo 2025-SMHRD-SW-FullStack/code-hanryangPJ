@@ -1,20 +1,19 @@
 package com.ottrade.ottrade.security.config;
 
 
+import com.ottrade.ottrade.security.filter.JwtAuthenticationFilter;
+import com.ottrade.ottrade.security.handler.OAuth2LoginSuccessHandler;
+import com.ottrade.ottrade.security.user.CustomOAuth2UserService;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-
-import com.ottrade.ottrade.security.filter.JwtAuthenticationFilter;
-import com.ottrade.ottrade.security.handler.OAuth2LoginSuccessHandler;
-import com.ottrade.ottrade.security.user.CustomOAuth2UserService;
-
-import lombok.RequiredArgsConstructor;
-
 
 @Configuration
 @EnableWebSecurity
@@ -24,41 +23,50 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
-    // 보안이 어떻게 처리되는지를 정의 
-    
+
+    // 보안이 어떻게 처리되는지를 정의
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        // 1. 기본 설정: CSRF, 세션, 기본 로그인 폼 비활성화
+        // 1. 기본 설정: CSRF, 기본 로그인 폼 비활성화
         http
             .csrf(AbstractHttpConfigurer::disable)
             .httpBasic(AbstractHttpConfigurer::disable)
             .formLogin(AbstractHttpConfigurer::disable);
 
+        // 2. 요청 경로별 접근 권한 설정 (back 브랜치 내용 적용)
         http
             .authorizeHttpRequests(auth -> auth
-
-                .requestMatchers(
-                        "/",
-                        "/auth/**",
-                        "/oauth2/**",           // OAuth2 로그인 시작 주소 (예: /oauth2/authorization/google)
-                        "/login/oauth2/code/**" // OAuth2 로그인 성공 후 콜백 주소
-                ).permitAll()
-                // /user/me 경로는 USER 또는 ADMIN 권한이 있어야 접근 가능
-                .requestMatchers("/user/me").hasAnyRole("USER", "ADMIN")
-
+                // 인증 및 회원가입 관련 경로는 모두 허용
+                .requestMatchers("/auth/**", "/login/oauth2/**", "/oauth2/**").permitAll()
+                // 게시판 관련 GET 요청은 모두 허용 (비로그인 사용자도 조회 가능)
+                .requestMatchers(HttpMethod.GET, "/board/**").permitAll()
+                // HS코드 검색 관련 GET 요청 허용
+                .requestMatchers(HttpMethod.GET, "/search-summary/**", "/grouped/**", "/top3/**").permitAll()
+                // AI 분석 API 모든 사용자에게 허용
+                .requestMatchers("/api/gpt/**").permitAll()
+                // 내 정보 조회는 'USER', 'ADMIN' 역할 필요
+                .requestMatchers("/api/users/me").hasAnyRole("USER", "ADMIN")
+                // 나머지 모든 요청은 인증 필요
                 .anyRequest().authenticated()
             );
 
-        	// 이쪽에서 소셜로그인 주소로 이동시킴 
+        // 3. 소셜 로그인 설정
         http
             .oauth2Login(oauth2 -> oauth2
-
                 .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
-
                 .successHandler(oAuth2LoginSuccessHandler)
             );
 
+        // 4. 예외 처리 설정 (back 브랜치 내용 적용)
+        http
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint((request, response, authException) -> {
+                    // 인증되지 않은 요청에 대해 401 Unauthorized 응답을 보냅니다.
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+                })
+            );
 
+        // 5. JWT 필터 추가
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
