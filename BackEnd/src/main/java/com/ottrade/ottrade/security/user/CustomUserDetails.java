@@ -47,3 +47,7 @@ public class CustomUserDetails implements UserDetails, OAuth2User {
     @Override public String getName() { return String.valueOf(user.getId()); }
     @Override public Map<String, Object> getAttributes() { return attributes; }
 }
+
+
+
+
